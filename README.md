@@ -82,7 +82,7 @@ docker compose up --build -d
 
 Open your browser at:
 ```text
-http://localhost:8000
+http://localhost:8081
 ```
 
 To stop the container:
@@ -105,10 +105,10 @@ pip install -r requirements.txt
 
 ### 3. Run the ASGI Server
 ```bash
-uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload --no-access-log
+uvicorn app.main:app --host 0.0.0.0 --port 8081 --reload --no-access-log
 ```
 
-Open `http://localhost:8000` or `http://<your-lan-ip>:8000` on any phone, tablet, or laptop on your local Wi-Fi.
+Open `http://localhost:8081` or `http://<your-lan-ip>:8081` on any phone, tablet, or laptop on your local Wi-Fi.
 
 ---
 

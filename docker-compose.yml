@@ -6,6 +6,6 @@ services:
     container_name: quickclip-app
     restart: unless-stopped
     ports:
-      - "8000:8000"
+      - "8081:8081"
     environment:
-      - PORT=8000
+      - PORT=8081
