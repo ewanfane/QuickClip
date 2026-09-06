@@ -1,0 +1,11 @@
+services:
+  quickclip:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: quickclip-app
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - PORT=8000
