@@ -251,31 +251,71 @@
     return null;
   }
 
+  let activeInitId = 0;
+
   async function initRoom(requestedCode = null) {
+    const initId = ++activeInitId;
     try {
-      let altchaToken = null;
-      if (window.altchaClient) {
-        altchaToken = await window.altchaClient.getValidToken();
+      let roomData = null;
+
+      if (requestedCode) {
+        // Fast path for joining: direct lookup without waiting for PoW
+        try {
+          const checkRes = await fetch(`/api/room/${requestedCode}`);
+          if (initId !== activeInitId) return false;
+
+          if (checkRes.ok) {
+            const data = await checkRes.json();
+            if (data.success && data.room) {
+              roomData = data.room;
+            }
+          } else if (checkRes.status === 404) {
+            showToast(`Session ${requestedCode} not found or has expired`, 'warning');
+            return false;
+          }
+        } catch (err) {
+          console.warn('Room check error:', err);
+        }
       }
 
-      const payload = {};
-      if (requestedCode) payload.code = requestedCode;
-      if (altchaToken) payload.altcha = altchaToken;
+      // If creating a fresh room (or code was provided to initialize a new room)
+      if (!roomData) {
+        let altchaToken = null;
+        // Only fetch Altcha for anonymous fresh room generation, NEVER for joining a code
+        if (!requestedCode && window.altchaClient) {
+          altchaToken = await window.altchaClient.getValidToken();
+          if (initId !== activeInitId) return false;
+        }
 
-      const res = await fetch('/api/room', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-      const data = await res.json();
-      if (data.success && data.room) {
-        currentRoomCode = data.room.code;
-        remainingSeconds = data.room.remaining_seconds;
-        clips = data.room.clips || [];
+        const payload = {};
+        if (requestedCode) payload.code = requestedCode;
+        if (altchaToken) payload.altcha = altchaToken;
+
+        const res = await fetch('/api/room', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        if (initId !== activeInitId) return false;
+
+        const data = await res.json();
+        if (data.success && data.room) {
+          roomData = data.room;
+        } else {
+          showToast(data.detail || 'Failed to initialize session', 'warning');
+          return false;
+        }
+      }
+
+      if (roomData) {
+        currentRoomCode = roomData.code;
+        remainingSeconds = roomData.remaining_seconds;
+        clips = roomData.clips || [];
 
         if (window.quickclipCrypto) {
           currentCryptoKey = await window.quickclipCrypto.deriveKey(currentRoomCode);
         }
+        if (initId !== activeInitId) return false;
 
         const newUrl = `${window.location.origin}/?room=${currentRoomCode}`;
         window.history.replaceState({ room: currentRoomCode }, '', newUrl);
@@ -283,19 +323,24 @@
         renderRoomState();
         connectWebSocket();
         startTimer();
-      } else {
-        showToast(data.detail || 'Failed to initialize session', 'warning');
+        return true;
       }
+      return false;
     } catch (err) {
+      if (initId !== activeInitId) return false;
       console.error('Session init error:', err);
       showToast('Network error initializing session', 'warning');
+      return false;
     }
   }
 
   function renderRoomState() {
     if (currentRoomCode && currentRoomCode.length === 5) {
       for (let i = 0; i < 5; i++) {
-        if (digitEls[i]) digitEls[i].textContent = currentRoomCode[i];
+        if (digitEls[i]) {
+          digitEls[i].textContent = currentRoomCode[i];
+          digitEls[i].classList.remove('loading');
+        }
       }
     }
     if (modalCodeDigits) modalCodeDigits.textContent = currentRoomCode;
@@ -1098,11 +1143,21 @@
     if (e.target === joinModal) joinModal.classList.remove('active');
   });
 
-  btnSubmitJoin.addEventListener('click', () => {
+  btnSubmitJoin.addEventListener('click', async () => {
     const code = joinCodeInput.value.trim();
     if (code.length === 5 && /^\d+$/.test(code)) {
-      joinModal.classList.remove('active');
-      initRoom(code);
+      btnSubmitJoin.disabled = true;
+      const originalText = btnSubmitJoin.textContent;
+      btnSubmitJoin.textContent = 'Connecting...';
+      try {
+        const success = await initRoom(code);
+        if (success) {
+          joinModal.classList.remove('active');
+        }
+      } finally {
+        btnSubmitJoin.disabled = false;
+        btnSubmitJoin.textContent = originalText;
+      }
     } else {
       showToast('Please enter a valid 5-digit number', 'warning');
     }
@@ -1141,5 +1196,9 @@
   // Initialize
   handleWebShareTarget();
   const initialCode = getRoomCodeFromUrl();
-  initRoom(initialCode);
+  initRoom(initialCode).then((success) => {
+    if (!success && initialCode) {
+      initRoom();
+    }
+  });
 })();

@@ -1,4 +1,4 @@
-const CACHE_NAME = 'quickclip-v2-cache';
+const CACHE_NAME = 'quickclip-v2.2-cache';
 const STATIC_ASSETS = [
   '/',
   '/static/css/style.css',

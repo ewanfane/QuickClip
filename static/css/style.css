@@ -299,6 +299,17 @@ body {
   text-shadow: 0 0 14px rgba(0, 229, 163, 0.8);
 }
 
+.pin-digit.loading {
+  animation: pulse-pin 1.2s infinite ease-in-out;
+  color: rgba(0, 210, 255, 0.4);
+  border-color: rgba(0, 210, 255, 0.2);
+}
+
+@keyframes pulse-pin {
+  0%, 100% { opacity: 0.35; transform: scale(0.97); }
+  50% { opacity: 0.85; transform: scale(1.02); }
+}
+
 .pin-actions {
   display: flex;
   align-items: center;

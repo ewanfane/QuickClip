@@ -6,8 +6,10 @@ import time
 import secrets
 from typing import Optional, Dict, Any
 
-# Ephemeral server secret generated on startup - resets on server restart
-ALTCHA_SECRET = secrets.token_bytes(32)
+import os
+
+# Server secret with environment variable override or persistent fallback
+ALTCHA_SECRET = os.environ.get("ALTCHA_SECRET", "quickclip-altcha-secret-key-badduck-secure").encode("utf-8")
 
 # In-memory used challenge nonces to prevent replay attacks
 _used_challenges = {}
@@ -18,11 +20,11 @@ def clean_expired_nonces():
     for ch in expired:
         _used_challenges.pop(ch, None)
 
-def create_challenge(max_number: int = 50000, expires_in: int = 180) -> Dict[str, Any]:
+def create_challenge(max_number: int = 10000, expires_in: int = 900) -> Dict[str, Any]:
     """
     Creates an Altcha-compatible Proof-of-Work challenge.
-    max_number: maximum number to test (50,000 takes ~40-100ms in modern browsers).
-    expires_in: challenge expiration in seconds (default 3 minutes).
+    max_number: maximum number to test (10,000 takes ~10-30ms in modern browsers).
+    expires_in: challenge expiration in seconds (default 15 minutes).
     """
     clean_expired_nonces()
     
@@ -79,11 +81,11 @@ def verify_solution(payload: Any) -> bool:
         if algorithm != "SHA-256" or not challenge or number is None or not salt or not signature:
             return False
 
-        # 1. Verify expiration
+        # 1. Verify expiration (with 60-second grace window for client clock drift)
         if "?expires=" in salt:
             exp_str = salt.split("?expires=")[-1]
             try:
-                if int(exp_str) < int(time.time()):
+                if int(exp_str) < int(time.time()) - 60:
                     return False  # Expired
             except ValueError:
                 return False

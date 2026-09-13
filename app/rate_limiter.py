@@ -17,8 +17,17 @@ class IPRateLimiter:
             if not records[ip]:
                 records.pop(ip, None)
 
+    def get_client_ip(self, request: Request) -> str:
+        forwarded_for = request.headers.get("x-forwarded-for")
+        if forwarded_for:
+            return forwarded_for.split(",")[0].strip()
+        real_ip = request.headers.get("x-real-ip")
+        if real_ip:
+            return real_ip.strip()
+        return request.client.host if request.client else "unknown"
+
     def check_room_creation(self, request: Request, max_per_10m: int = 15):
-        client_ip = request.client.host if request.client else "unknown"
+        client_ip = self.get_client_ip(request)
         now = time.time()
         self._clean(self._room_creations, 600)
         
@@ -31,7 +40,7 @@ class IPRateLimiter:
         times.append(now)
 
     def check_upload(self, request: Request, max_per_minute: int = 40):
-        client_ip = request.client.host if request.client else "unknown"
+        client_ip = self.get_client_ip(request)
         now = time.time()
         self._clean(self._uploads, 60)
         

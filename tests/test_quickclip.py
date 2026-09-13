@@ -73,7 +73,7 @@ def test_pwa_manifest_and_sw():
 
     res_sw = client.get("/sw.js")
     assert res_sw.status_code == 200
-    assert "quickclip-v2-cache" in res_sw.text
+    assert "quickclip-v2" in res_sw.text
     assert "/static/js/crypto.js" in res_sw.text
 
 def test_standard_upload_limit_enforcement():
@@ -152,3 +152,47 @@ def test_burn_room_instant_wipe():
     res_burn = client.post(f"/api/room/{code}/burn")
     assert res_burn.status_code == 200
     assert client.get(f"/api/room/{code}").status_code == 404
+
+def test_join_existing_room_bypasses_altcha():
+    # Create initial room
+    res = client.post("/api/room")
+    code = res.json()["room"]["code"]
+
+    # Join existing room via POST without Altcha token
+    res_join_post = client.post("/api/room", json={"code": code})
+    assert res_join_post.status_code == 200
+    assert res_join_post.json()["success"] is True
+    assert res_join_post.json()["room"]["code"] == code
+
+    # Join existing room via GET direct lookup
+    res_join_get = client.get(f"/api/room/{code}")
+    assert res_join_get.status_code == 200
+    assert res_join_get.json()["room"]["code"] == code
+
+def test_rate_limiter_extracts_x_forwarded_for():
+    from unittest.mock import MagicMock
+    from app.rate_limiter import rate_limiter
+
+    # Test X-Forwarded-For with multiple proxies
+    req_forwarded = MagicMock()
+    req_forwarded.headers = {"x-forwarded-for": "203.0.113.55, 10.0.0.1"}
+    assert rate_limiter.get_client_ip(req_forwarded) == "203.0.113.55"
+
+    # Test X-Real-IP
+    req_real = MagicMock()
+    req_real.headers = {"x-real-ip": "198.51.100.12"}
+    assert rate_limiter.get_client_ip(req_real) == "198.51.100.12"
+
+def test_join_room_never_blocked_by_invalid_altcha():
+    res = client.post("/api/room", json={"code": "88888", "altcha": "invalid_or_replayed_token"})
+    assert res.status_code == 200
+    assert res.json()["success"] is True
+    assert res.json()["room"]["code"] == "88888"
+
+def test_invalid_altcha_on_upload_rejected():
+    res_room = client.post("/api/room")
+    code = res_room.json()["room"]["code"]
+    files = {"file": ("test.txt", io.BytesIO(b"hello world"), "text/plain")}
+    res = client.post(f"/api/room/{code}/upload", files=files, data={"altcha": "bogus_token"})
+    assert res.status_code == 400
+    assert "Bot protection verification failed" in res.json()["detail"]

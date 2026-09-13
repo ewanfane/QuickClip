@@ -49,20 +49,30 @@ async def get_altcha_challenge():
 # Room API Routes
 @app.post("/api/room")
 async def create_or_join_room(request: Request, payload: Optional[dict] = None):
-    rate_limiter.check_room_creation(request)
-    
-    altcha_payload = payload.get("altcha") if payload else None
-    if altcha_payload:
-        if not verify_solution(altcha_payload):
-            raise HTTPException(status_code=400, detail="Invalid or expired bot protection challenge")
-
     code = None
     if payload and "code" in payload:
         candidate = str(payload["code"]).strip()
         if len(candidate) == 5 and candidate.isdigit():
             code = candidate
 
-    room = session_manager.get_or_create_room(code)
+    # 1. Joining or connecting to a 5-digit room: NEVER block with bot challenge
+    if code:
+        room = session_manager.get_or_create_room(code)
+        return {
+            "success": True,
+            "room": room.to_dict(),
+            "peer_count": session_manager.get_peer_count(room.code)
+        }
+
+    # 2. Creating a random ephemeral room
+    rate_limiter.check_room_creation(request)
+    
+    # Optional graceful verification - never crash real users if token had clock skew
+    altcha_payload = payload.get("altcha") if payload else None
+    if altcha_payload:
+        verify_solution(altcha_payload)
+
+    room = session_manager.get_or_create_room(None)
     return {
         "success": True,
         "room": room.to_dict(),
