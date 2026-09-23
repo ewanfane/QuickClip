@@ -2,6 +2,7 @@ import asyncio
 import os
 import uuid
 import base64
+import json
 from contextlib import asynccontextmanager
 from typing import Optional
 
@@ -13,7 +14,6 @@ import io
 
 from app.models import Clip
 from app.session_manager import session_manager
-from app.altcha import create_challenge, verify_solution
 from app.rate_limiter import rate_limiter
 
 STATIC_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "static")
@@ -26,8 +26,8 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="QuickClip",
-    description="Instant Cross-Device Copy & Paste with WebRTC P2P & Altcha Bot Protection",
-    version="2.1.0",
+    description="Instant Cross-Device Copy & Paste with WebRTC P2P Direct Transfer",
+    version="2.2.0",
     lifespan=lifespan,
     docs_url=None,
     redoc_url=None
@@ -41,10 +41,23 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Altcha Bot / Spam Protection
-@app.get("/api/altcha/challenge")
-async def get_altcha_challenge():
-    return create_challenge(max_number=50000, expires_in=180)
+def detect_media_type(filename: str, mime: str, custom_type: Optional[str] = None) -> str:
+    if custom_type in ("image", "video", "audio", "pdf", "code", "file"):
+        return custom_type
+    mime_lower = (mime or "").lower()
+    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+
+    if mime_lower.startswith("image/") or ext in ("png", "jpg", "jpeg", "gif", "webp", "svg", "avif", "bmp", "ico"):
+        return "image"
+    if mime_lower.startswith("video/") or ext in ("mp4", "webm", "ogg", "mov", "m4v", "mkv"):
+        return "video"
+    if mime_lower.startswith("audio/") or ext in ("mp3", "wav", "ogg", "m4a", "aac", "flac", "weba"):
+        return "audio"
+    if mime_lower == "application/pdf" or ext == "pdf":
+        return "pdf"
+    if ext in ("txt", "md", "json", "js", "py", "html", "css", "csv", "xml", "yaml", "yml", "sh", "sql", "c", "cpp", "ts"):
+        return "code"
+    return "file"
 
 # Room API Routes
 @app.post("/api/room")
@@ -55,7 +68,7 @@ async def create_or_join_room(request: Request, payload: Optional[dict] = None):
         if len(candidate) == 5 and candidate.isdigit():
             code = candidate
 
-    # 1. Joining or connecting to a 5-digit room: NEVER block with bot challenge
+    # 1. Joining or connecting to a 5-digit room: instant, no bot challenge
     if code:
         room = session_manager.get_or_create_room(code)
         return {
@@ -66,12 +79,6 @@ async def create_or_join_room(request: Request, payload: Optional[dict] = None):
 
     # 2. Creating a random ephemeral room
     rate_limiter.check_room_creation(request)
-    
-    # Optional graceful verification - never crash real users if token had clock skew
-    altcha_payload = payload.get("altcha") if payload else None
-    if altcha_payload:
-        verify_solution(altcha_payload)
-
     room = session_manager.get_or_create_room(None)
     return {
         "success": True,
@@ -96,13 +103,10 @@ async def upload_file(
     code: str,
     file: UploadFile = File(...),
     custom_type: Optional[str] = Form(None),
-    altcha: Optional[str] = Form(None)
+    file_name: Optional[str] = Form(None),
+    mime_type: Optional[str] = Form(None)
 ):
     rate_limiter.check_upload(request)
-
-    if altcha:
-        if not verify_solution(altcha):
-            raise HTTPException(status_code=400, detail="Bot protection verification failed")
 
     room = session_manager.get_room(code)
     if not room:
@@ -118,16 +122,30 @@ async def upload_file(
         )
 
     clip_id = uuid.uuid4().hex[:12]
-    filename = file.filename or f"clip-{clip_id}"
-    mime_type = file.content_type or "application/octet-stream"
-    clip_type = custom_type or ("image" if mime_type.startswith("image/") else "file")
+    filename = file_name or file.filename or f"clip-{clip_id}"
+    m_type = mime_type or file.content_type or "application/octet-stream"
+
+    # If encrypted in QCE1 format and metadata was not explicitly provided in form, extract original metadata
+    is_encrypted = file_bytes.startswith(b"QCE1")
+    if is_encrypted and len(file_bytes) > 18:
+        try:
+            meta_len = (file_bytes[16] << 8) | file_bytes[17]
+            if len(file_bytes) >= 18 + meta_len:
+                meta = json.loads(file_bytes[18:18 + meta_len].decode("utf-8"))
+                if not file_name and "name" in meta:
+                    filename = meta["name"]
+                if not mime_type and "type" in meta:
+                    m_type = meta["type"]
+        except Exception:
+            pass
+
+    clip_type = detect_media_type(filename, m_type, custom_type)
     
     # Generate preview data URL only for legacy unencrypted images (never for QCE1 encrypted files)
     content = None
-    is_encrypted = file_bytes.startswith(b"QCE1")
-    if clip_type == "image" and not is_encrypted and mime_type.startswith("image/"):
+    if clip_type == "image" and not is_encrypted and m_type.startswith("image/"):
         b64 = base64.b64encode(file_bytes).decode("utf-8")
-        content = f"data:{mime_type};base64,{b64}"
+        content = f"data:{m_type};base64,{b64}"
 
     clip = Clip(
         id=clip_id,
@@ -135,7 +153,7 @@ async def upload_file(
         content=content,
         file_name=filename,
         file_size=len(file_bytes),
-        mime_type=mime_type,
+        mime_type=m_type,
         download_url=f"/api/room/{code}/files/{clip_id}",
         file_bytes=file_bytes
     )

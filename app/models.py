@@ -6,8 +6,8 @@ import uuid
 @dataclass
 class Clip:
     id: str
-    type: str  # 'text', 'image', 'file'
-    content: Optional[str] = None  # Text content, or base64 preview for quick images
+    type: str  # 'text', 'image', 'video', 'audio', 'pdf', 'code', 'file', 'p2p_file'
+    content: Optional[str] = None  # Text content, or preview data
     file_name: Optional[str] = None
     file_size: Optional[int] = None
     mime_type: Optional[str] = None

@@ -639,7 +639,12 @@ body {
 
 .badge-txt { background: rgba(0, 210, 255, 0.15); color: #38bdf8; }
 .badge-img { background: rgba(0, 229, 163, 0.15); color: #34d399; }
+.badge-vid { background: rgba(244, 63, 94, 0.15); color: #fb7185; }
+.badge-aud { background: rgba(245, 158, 11, 0.15); color: #fbbf24; }
+.badge-pdf { background: rgba(239, 68, 68, 0.15); color: #f87171; }
+.badge-code { background: rgba(16, 185, 129, 0.15); color: #34d399; }
 .badge-doc { background: rgba(168, 85, 247, 0.15); color: #c084fc; }
+.badge-p2p { background: rgba(0, 210, 255, 0.2); color: #00d2ff; }
 
 .item-time {
   font-size: 0.76rem;
@@ -686,6 +691,82 @@ body {
 
 .item-body-image img:hover {
   transform: scale(1.015);
+}
+
+.item-body-video {
+  margin-bottom: 14px;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background: #000;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  position: relative;
+}
+
+.item-body-video video {
+  width: 100%;
+  max-height: 420px;
+  border-radius: var(--radius-sm);
+  outline: none;
+  background: #000;
+}
+
+.item-body-audio {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  background: rgba(0, 0, 0, 0.32);
+  padding: 14px;
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  margin-bottom: 14px;
+}
+
+.audio-track-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.audio-glyph {
+  width: 44px;
+  height: 44px;
+  border-radius: var(--radius-sm);
+  background: rgba(245, 158, 11, 0.15);
+  color: #fbbf24;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.item-body-audio audio {
+  width: 100%;
+  height: 40px;
+  outline: none;
+  border-radius: var(--radius-xs);
+}
+
+.media-skeleton {
+  width: 100%;
+  min-height: 180px;
+  background: linear-gradient(90deg, rgba(255,255,255,0.02) 25%, rgba(255,255,255,0.06) 50%, rgba(255,255,255,0.02) 75%);
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.5s infinite;
+  border-radius: var(--radius-sm);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--text-dim);
+  font-size: 0.85rem;
+}
+
+@keyframes skeleton-shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
 }
 
 .item-body-file {

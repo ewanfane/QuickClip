@@ -1,27 +1,46 @@
 import pytest
 import io
-import hashlib
+import json
 import time
 from fastapi.testclient import TestClient
 from app.main import app
 from app.session_manager import session_manager
 from app.models import Room, Clip
-from app.altcha import create_challenge, verify_solution
 
 client = TestClient(app)
 
 def test_self_contained_zero_external_calls():
-    # 1. Verify index.html does not reference external Google Fonts
+    # 1. Verify index.html does not reference external Google Fonts or Altcha
     res_index = client.get("/")
     assert res_index.status_code == 200
     html = res_index.text
     assert "fonts.googleapis.com" not in html
     assert "fonts.gstatic.com" not in html
+    assert "altcha.js" not in html
 
     # 2. Verify crypto.js is served locally
     res_crypto = client.get("/static/js/crypto.js")
     assert res_crypto.status_code == 200
     assert "QuickClipCrypto" in res_crypto.text
+
+def test_instant_room_creation_and_joining():
+    # Create room without any bot token
+    res_create = client.post("/api/room")
+    assert res_create.status_code == 200
+    data = res_create.json()
+    assert data["success"] is True
+    code = data["room"]["code"]
+    assert len(code) == 5 and code.isdigit()
+
+    # Join existing room via POST
+    res_join_post = client.post("/api/room", json={"code": code})
+    assert res_join_post.status_code == 200
+    assert res_join_post.json()["room"]["code"] == code
+
+    # Lookup room via GET
+    res_lookup = client.get(f"/api/room/{code}")
+    assert res_lookup.status_code == 200
+    assert res_lookup.json()["room"]["code"] == code
 
 def test_encrypted_storage_zero_knowledge():
     res = client.post("/api/room")
@@ -49,18 +68,59 @@ def test_encrypted_storage_zero_knowledge():
     # 2. Upload encrypted binary file (QCE1 format)
     # Header: QCE1 (4 bytes) + 12-byte IV + 2-byte MetaLen + JSON + encrypted data
     raw_secret_doc = b"CONFIDENTIAL_USER_DATA_FILE_PAYLOAD"
-    qce_header = b"QCE1" + b"\x00" * 12 + b"\x00\x10" + b'{"name":"doc.pdf"}'
+    meta_json = b'{"name":"doc.pdf","type":"application/pdf","size":35}'
+    meta_len = len(meta_json)
+    qce_header = b"QCE1" + b"\x00" * 12 + bytes([meta_len >> 8, meta_len & 0xFF]) + meta_json
     encrypted_file_payload = qce_header + b"CIPHERTEXT_BYTES_HERE_NOT_RAW"
 
     files = {"file": ("encrypted.bin", io.BytesIO(encrypted_file_payload), "application/octet-stream")}
     res_up = client.post(f"/api/room/{code}/upload", files=files)
     assert res_up.status_code == 200
 
-    # Verify server stored ONLY encrypted bytes and that raw payload is nowhere in server memory
     uploaded_clip = session_manager.get_room(code).clips[0]
     assert uploaded_clip.file_bytes.startswith(b"QCE1")
     assert raw_secret_doc not in uploaded_clip.file_bytes
-    assert uploaded_clip.file_name == "encrypted.bin"
+    assert uploaded_clip.file_name == "doc.pdf"
+    assert uploaded_clip.type == "pdf"
+
+def test_media_type_detection_and_upload():
+    res = client.post("/api/room")
+    code = res.json()["room"]["code"]
+
+    # 1. Image Upload
+    img_data = b"\x89PNG\r\n\x1a\n" + b"\x00" * 20
+    files = {"file": ("screenshot.png", io.BytesIO(img_data), "image/png")}
+    res_img = client.post(f"/api/room/{code}/upload", files=files)
+    assert res_img.status_code == 200
+    assert res_img.json()["clip"]["type"] == "image"
+
+    # 2. Video Upload
+    vid_data = b"MOCK_VIDEO_STREAM" * 50
+    files = {"file": ("vacation.mp4", io.BytesIO(vid_data), "video/mp4")}
+    res_vid = client.post(f"/api/room/{code}/upload", files=files)
+    assert res_vid.status_code == 200
+    assert res_vid.json()["clip"]["type"] == "video"
+
+    # 3. Audio Upload
+    aud_data = b"MOCK_AUDIO_DATA" * 50
+    files = {"file": ("podcast.mp3", io.BytesIO(aud_data), "audio/mpeg")}
+    res_aud = client.post(f"/api/room/{code}/upload", files=files)
+    assert res_aud.status_code == 200
+    assert res_aud.json()["clip"]["type"] == "audio"
+
+    # 4. PDF Upload
+    pdf_data = b"%PDF-1.5" + b"\x00" * 50
+    files = {"file": ("report.pdf", io.BytesIO(pdf_data), "application/pdf")}
+    res_pdf = client.post(f"/api/room/{code}/upload", files=files)
+    assert res_pdf.status_code == 200
+    assert res_pdf.json()["clip"]["type"] == "pdf"
+
+    # 5. Code / Text File Upload
+    code_data = b"def hello(): return 'world'"
+    files = {"file": ("script.py", io.BytesIO(code_data), "text/x-python")}
+    res_code = client.post(f"/api/room/{code}/upload", files=files)
+    assert res_code.status_code == 200
+    assert res_code.json()["clip"]["type"] == "code"
 
 def test_pwa_manifest_and_sw():
     res = client.get("/manifest.json")
@@ -75,6 +135,7 @@ def test_pwa_manifest_and_sw():
     assert res_sw.status_code == 200
     assert "quickclip-v2" in res_sw.text
     assert "/static/js/crypto.js" in res_sw.text
+    assert "altcha.js" not in res_sw.text
 
 def test_standard_upload_limit_enforcement():
     res = client.post("/api/room")
@@ -117,34 +178,6 @@ def test_webrtc_signaling_relay():
             assert relayed["sender_peer_id"] == peer1_id
             assert relayed["signal"]["sdp"] == "v=0\r\no=mock-sdp-test"
 
-def test_altcha_challenge_and_verification():
-    res = client.get("/api/altcha/challenge")
-    assert res.status_code == 200
-    ch = res.json()
-    assert ch["algorithm"] == "SHA-256"
-
-    salt = ch["salt"]
-    target_challenge = ch["challenge"]
-    maxnumber = ch["maxnumber"]
-    
-    solution_number = None
-    for i in range(1, maxnumber + 1):
-        h = hashlib.sha256(f"{salt}{i}".encode("utf-8")).hexdigest()
-        if h == target_challenge:
-            solution_number = i
-            break
-    assert solution_number is not None
-
-    payload = {
-        "algorithm": "SHA-256",
-        "challenge": target_challenge,
-        "number": solution_number,
-        "salt": salt,
-        "signature": ch["signature"]
-    }
-    assert verify_solution(payload) is True
-    assert verify_solution(payload) is False
-
 def test_burn_room_instant_wipe():
     res = client.post("/api/room")
     code = res.json()["room"]["code"]
@@ -152,22 +185,6 @@ def test_burn_room_instant_wipe():
     res_burn = client.post(f"/api/room/{code}/burn")
     assert res_burn.status_code == 200
     assert client.get(f"/api/room/{code}").status_code == 404
-
-def test_join_existing_room_bypasses_altcha():
-    # Create initial room
-    res = client.post("/api/room")
-    code = res.json()["room"]["code"]
-
-    # Join existing room via POST without Altcha token
-    res_join_post = client.post("/api/room", json={"code": code})
-    assert res_join_post.status_code == 200
-    assert res_join_post.json()["success"] is True
-    assert res_join_post.json()["room"]["code"] == code
-
-    # Join existing room via GET direct lookup
-    res_join_get = client.get(f"/api/room/{code}")
-    assert res_join_get.status_code == 200
-    assert res_join_get.json()["room"]["code"] == code
 
 def test_rate_limiter_extracts_x_forwarded_for():
     from unittest.mock import MagicMock
@@ -182,17 +199,3 @@ def test_rate_limiter_extracts_x_forwarded_for():
     req_real = MagicMock()
     req_real.headers = {"x-real-ip": "198.51.100.12"}
     assert rate_limiter.get_client_ip(req_real) == "198.51.100.12"
-
-def test_join_room_never_blocked_by_invalid_altcha():
-    res = client.post("/api/room", json={"code": "88888", "altcha": "invalid_or_replayed_token"})
-    assert res.status_code == 200
-    assert res.json()["success"] is True
-    assert res.json()["room"]["code"] == "88888"
-
-def test_invalid_altcha_on_upload_rejected():
-    res_room = client.post("/api/room")
-    code = res_room.json()["room"]["code"]
-    files = {"file": ("test.txt", io.BytesIO(b"hello world"), "text/plain")}
-    res = client.post(f"/api/room/{code}/upload", files=files, data={"altcha": "bogus_token"})
-    assert res.status_code == 400
-    assert "Bot protection verification failed" in res.json()["detail"]

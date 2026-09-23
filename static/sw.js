@@ -1,11 +1,10 @@
-const CACHE_NAME = 'quickclip-v2.2-cache';
+const CACHE_NAME = 'quickclip-v2.3-cache';
 const STATIC_ASSETS = [
   '/',
   '/static/css/style.css',
   '/static/js/crypto.js',
   '/static/js/app.js',
   '/static/js/webrtc.js',
-  '/static/js/altcha.js',
   '/static/js/qrcode.min.js',
   '/static/manifest.json',
   '/static/assets/logo-mark.png',

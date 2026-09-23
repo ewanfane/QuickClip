@@ -35,14 +35,22 @@ How often do you email yourself a link, photo, code snippet, or PDF just to move
 
 ### 🛡️ 100% Self-Contained & Air-Gapped
 - **Zero External Dependencies**: QuickClip makes **zero external API calls**. No external analytics, no CDNs, and no external web fonts (renders with optimized native system typography).
-- **Self-Hosted Altcha PoW Bot Protection**: Built-in cryptographic Proof-of-Work challenge solver prevents spam and bot abuse without annoying CAPTCHAs or third-party cookies.
-- **In-Memory IP Rate Limiting**: Sliding-window rate limiter prevents session exhaustion.
+- **In-Memory IP Rate Limiting**: Sliding-window rate limiter prevents session exhaustion and spam without burning client CPU or introducing friction.
+- **Zero Bot Friction**: Room joining, creation, and uploads execute instantaneously (sub-50ms) without CAPTCHAs, cookies, or PoW delays.
+
+### 🎬 Rich In-Browser Media Viewing & Playback
+- **Inline Image Viewing & Zoom**: Automatic client-side decryption of photos and screenshots; click to expand in high-res lightbox modal.
+- **HTML5 Video Player**: Stream MP4, WebM, and MOV videos directly in-browser with scrubber, fullscreen, and dedicated Theater View modal.
+- **Inline Audio Player**: Listen to audio clips (MP3, WAV, OGG, M4A, FLAC) with custom playback scrubber.
+- **PDF Document Quick View**: Inspect and read PDFs in an interactive in-browser modal without having to download them to disk.
+- **Code & Text Snippet Viewer**: Syntax-styled monospace previews for source files (`.py`, `.js`, `.json`, `.md`, `.txt`, `.csv`) with one-click clipboard copying.
 
 ### 📋 Seamless Input Everywhere
 - **Global `Ctrl+V` / `Cmd+V`**: Press paste anywhere on the screen—QuickClip captures text, clipboard screenshots, and copied files automatically.
 - **Drag & Drop Zone**: Drop files directly onto the window to share them.
 - **One-Click Native Paste**: Mobile-friendly clipboard button requesting system clipboard permission.
 - **One-Click Copy & Download**: Instant visual feedback for copying text, copying images to system clipboard, and downloading files with decrypted names.
+- **Non-Intrusive P2P**: Files streamed via WebRTC direct transfer are viewable and playable directly in the browser upon receipt.
 
 ### ⏱️ Ephemeral Sessions & Zero-Log Architecture
 - **5-Digit Room Codes**: Simple numeric PINs (e.g., `83921`) with instant QR code scanning.
@@ -114,10 +122,10 @@ Open `http://localhost:8081` or `http://<your-lan-ip>:8081` on any phone, tablet
 
 ## 🧪 Running Automated Tests
 
-QuickClip includes an automated test suite verifying zero external calls, zero-knowledge encrypted storage, WebRTC signaling, PWA routes, Altcha PoW verification, 10 MB upload limits, and auto-wipe mechanics:
+QuickClip includes an automated test suite verifying zero external calls, zero-knowledge encrypted storage, WebRTC signaling, PWA routes, media type detection, 10 MB upload limits, and auto-wipe mechanics:
 
 ```bash
-pytest tests/test_quickclip.py -v
+docker compose run --rm quickclip sh -c "pip install pytest httpx >/dev/null 2>&1 && PYTHONPATH=. pytest tests/ -v"
 ```
 
 ---
@@ -125,31 +133,29 @@ pytest tests/test_quickclip.py -v
 ## 📁 Project Structure
 
 ```text
-quickclip2/
+quickclip/
 ├── app/
-│   ├── main.py              # FastAPI ASGI app (WebSockets, upload endpoint, PWA routes)
+│   ├── main.py              # FastAPI ASGI app (WebSockets, upload endpoint, media detection)
 │   ├── session_manager.py   # Ephemeral room state, peer tracking, 20-min auto-wipe
-│   ├── models.py            # Clip and Room data models
-│   ├── altcha.py            # Self-hosted HMAC SHA-256 Altcha PoW challenge engine
+│   ├── models.py            # Clip and Room data models (image, video, audio, pdf, code, file)
 │   └── rate_limiter.py      # Sliding-window in-memory IP rate limiter
 ├── static/
-│   ├── index.html           # UI shell with PIN blocks, radial timer, QR & explainer modals
+│   ├── index.html           # UI shell with PIN blocks, radial timer, QR & media modals
 │   ├── manifest.json        # PWA Web App Manifest with Web Share Target
 │   ├── sw.js                # Service Worker for offline asset caching
 │   ├── css/
-│   │   └── style.css        # Vanilla CSS design system (native fonts, glassmorphism)
+│   │   └── style.css        # Vanilla CSS design system (native fonts, media players)
 │   ├── js/
-│   │   ├── app.js           # Frontend orchestrator, UI binding, WebSocket handlers
+│   │   ├── app.js           # Frontend orchestrator, UI binding, media players & lightboxes
 │   │   ├── crypto.js        # Web Crypto API: PBKDF2 key derivation & AES-GCM-256 E2EE
 │   │   ├── webrtc.js        # WebRTC P2P direct file streaming engine (RTCDataChannel)
-│   │   ├── altcha.js        # Client-side non-blocking PoW challenge solver
 │   │   └── qrcode.min.js    # Self-contained pure JS canvas QR generator
 │   └── assets/              # App icons, favicons, and QuickClip brand glyph
 ├── tests/
-│   └── test_quickclip.py    # Pytest test suite (7 comprehensive test cases)
+│   └── test_quickclip.py    # Pytest test suite (9 comprehensive test cases)
 ├── Dockerfile               # Multi-stage container definition
 ├── docker-compose.yml       # Production-ready Docker Compose configuration
-└── requirements.txt         # Python dependencies (FastAPI, Uvicorn, Pytest, etc.)
+└── requirements.txt         # Python dependencies (FastAPI, Uvicorn, etc.)
 ```
 
 ---

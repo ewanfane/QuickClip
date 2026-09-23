@@ -46,7 +46,6 @@
   const btnJoinModal = document.getElementById('btn-join-modal');
   const btnBurnSession = document.getElementById('btn-burn-session');
   const btnClearAll = document.getElementById('btn-clear-all');
-  const altchaStatusText = document.getElementById('altcha-status-text');
   const btnInstallPwa = document.getElementById('btn-install-pwa');
 
   // P2P Panel Elements
@@ -78,7 +77,52 @@
   const zoomedImage = document.getElementById('zoomed-image');
   const zoomModalClose = document.getElementById('zoom-modal-close');
 
+  // Video Theater Modal
+  const videoModal = document.getElementById('video-modal');
+  const videoModalClose = document.getElementById('video-modal-close');
+  const modalVideoPlayer = document.getElementById('modal-video-player');
+  const videoModalTitle = document.getElementById('video-modal-title');
+
+  // PDF Quick View Modal
+  const pdfModal = document.getElementById('pdf-modal');
+  const pdfModalClose = document.getElementById('pdf-modal-close');
+  const pdfModalFrame = document.getElementById('pdf-modal-frame');
+  const pdfModalTitle = document.getElementById('pdf-modal-title');
+  const pdfModalOpenTab = document.getElementById('pdf-modal-open-tab');
+
+  // Text / Code Snippet Modal
+  const codeModal = document.getElementById('code-modal');
+  const codeModalClose = document.getElementById('code-modal-close');
+  const codeModalContent = document.getElementById('code-modal-content');
+  const codeModalTitle = document.getElementById('code-modal-title');
+  const codeModalCopy = document.getElementById('code-modal-copy');
+
   const toastContainer = document.getElementById('toast-container');
+
+  function detectMediaType(name = '', mime = '', customType = null) {
+    if (customType && ['image', 'video', 'audio', 'pdf', 'code', 'file'].includes(customType)) {
+      return customType;
+    }
+    const mimeLower = (mime || '').toLowerCase();
+    const ext = (name.includes('.') ? name.split('.').pop() : '').toLowerCase();
+
+    if (mimeLower.startsWith('image/') || ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'avif', 'bmp', 'ico'].includes(ext)) {
+      return 'image';
+    }
+    if (mimeLower.startsWith('video/') || ['mp4', 'webm', 'ogg', 'mov', 'm4v', 'mkv'].includes(ext)) {
+      return 'video';
+    }
+    if (mimeLower.startsWith('audio/') || ['mp3', 'wav', 'ogg', 'm4a', 'aac', 'flac', 'weba'].includes(ext)) {
+      return 'audio';
+    }
+    if (mimeLower === 'application/pdf' || ext === 'pdf') {
+      return 'pdf';
+    }
+    if (['txt', 'md', 'json', 'js', 'py', 'html', 'css', 'csv', 'xml', 'yaml', 'yml', 'sh', 'sql', 'c', 'cpp', 'ts', 'jsx', 'tsx'].includes(ext)) {
+      return 'code';
+    }
+    return 'file';
+  }
 
   // --- Service Worker & PWA Install ---
 
@@ -174,14 +218,6 @@
     return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
   }
 
-  // --- Altcha Hook ---
-  if (window.altchaClient) {
-    window.altchaClient.onStatusChange((status, text) => {
-      if (altchaStatusText) altchaStatusText.textContent = text;
-    });
-    window.altchaClient.fetchAndSolve();
-  }
-
   // --- WebRTC Progress & Receiver Callbacks ---
 
   function setupWebRTCCallbacks() {
@@ -210,19 +246,13 @@
       },
       onFileReceived: (fileData) => {
         showToast(`Received ${fileData.name} via direct P2P!`, 'success');
+        const mediaType = detectMediaType(fileData.name, fileData.mime_type);
         
-        // Auto trigger download
-        const a = document.createElement('a');
-        a.href = fileData.downloadUrl;
-        a.download = fileData.name;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-
-        // Add to local feed
+        // Add to local feed with rich in-browser playback/viewing
         const p2pClip = {
           id: fileData.id,
-          type: 'p2p_file',
+          type: mediaType,
+          is_p2p: true,
           content: null,
           file_name: fileData.name,
           file_size: fileData.size,
@@ -259,7 +289,7 @@
       let roomData = null;
 
       if (requestedCode) {
-        // Fast path for joining: direct lookup without waiting for PoW
+        // Direct lookup for joining existing room
         try {
           const checkRes = await fetch(`/api/room/${requestedCode}`);
           if (initId !== activeInitId) return false;
@@ -280,16 +310,8 @@
 
       // If creating a fresh room (or code was provided to initialize a new room)
       if (!roomData) {
-        let altchaToken = null;
-        // Only fetch Altcha for anonymous fresh room generation, NEVER for joining a code
-        if (!requestedCode && window.altchaClient) {
-          altchaToken = await window.altchaClient.getValidToken();
-          if (initId !== activeInitId) return false;
-        }
-
         const payload = {};
         if (requestedCode) payload.code = requestedCode;
-        if (altchaToken) payload.altcha = altchaToken;
 
         const res = await fetch('/api/room', {
           method: 'POST',
@@ -543,15 +565,31 @@
     card.className = 'clip-item-card';
     card.id = `clip-${clip.id}`;
 
+    const effectiveType = clip.type === 'text' 
+      ? 'text' 
+      : detectMediaType(clip.file_name, clip.mime_type, clip.type !== 'p2p_file' && clip.type !== 'file' ? clip.type : null);
+
     let badgeClass = 'badge-txt';
     let badgeLabel = 'Text';
-    if (clip.type === 'image') {
-      badgeClass = 'badge-img';
-      badgeLabel = 'Image';
-    } else if (clip.type === 'p2p_file') {
+    if (clip.is_p2p || clip.type === 'p2p_file') {
       badgeClass = 'badge-p2p';
       badgeLabel = '⚡ P2P Direct';
-    } else if (clip.type === 'file') {
+    } else if (effectiveType === 'image') {
+      badgeClass = 'badge-img';
+      badgeLabel = 'Image';
+    } else if (effectiveType === 'video') {
+      badgeClass = 'badge-vid';
+      badgeLabel = 'Video';
+    } else if (effectiveType === 'audio') {
+      badgeClass = 'badge-aud';
+      badgeLabel = 'Audio';
+    } else if (effectiveType === 'pdf') {
+      badgeClass = 'badge-pdf';
+      badgeLabel = 'PDF';
+    } else if (effectiveType === 'code') {
+      badgeClass = 'badge-code';
+      badgeLabel = 'Code / Text';
+    } else {
       badgeClass = 'badge-doc';
       badgeLabel = 'File';
     }
@@ -560,7 +598,40 @@
     let actionsHtml = '';
     let decryptedText = clip.content;
 
-    if (clip.type === 'text') {
+    // Helper to fetch & decrypt media in memory (zero-knowledge)
+    let cachedDecrypted = null;
+    async function getDecryptedMedia() {
+      if (cachedDecrypted) return cachedDecrypted;
+      if (clip.download_url && clip.download_url.startsWith('blob:')) {
+        cachedDecrypted = {
+          blob: null,
+          downloadUrl: clip.download_url,
+          name: clip.file_name,
+          mimeType: clip.mime_type,
+          size: clip.file_size
+        };
+        return cachedDecrypted;
+      }
+      if (clip.download_url) {
+        const res = await fetch(clip.download_url);
+        const buf = await res.arrayBuffer();
+        if (currentCryptoKey && window.quickclipCrypto) {
+          cachedDecrypted = await window.quickclipCrypto.decryptFile(buf, currentCryptoKey);
+        } else {
+          const b = new Blob([buf], { type: clip.mime_type || 'application/octet-stream' });
+          cachedDecrypted = {
+            blob: b,
+            downloadUrl: URL.createObjectURL(b),
+            name: clip.file_name,
+            mimeType: clip.mime_type,
+            size: clip.file_size
+          };
+        }
+      }
+      return cachedDecrypted;
+    }
+
+    if (effectiveType === 'text') {
       if (clip.content && clip.content.startsWith('enc:v1:') && currentCryptoKey && window.quickclipCrypto) {
         decryptedText = await window.quickclipCrypto.decryptText(clip.content, currentCryptoKey);
       }
@@ -576,14 +647,22 @@
           Copy Text
         </button>
       `;
-    } else if (clip.type === 'image') {
+    } else if (effectiveType === 'image') {
       bodyHtml = `
         <div class="item-body-image">
-          <img src="${clip.content || ''}" alt="Encrypted image preview" class="zoomable-thumb" id="img-${clip.id}" />
+          <img src="${clip.content || ''}" alt="Image preview" class="zoomable-thumb" id="img-${clip.id}" style="${clip.content ? '' : 'display:none;'}" />
+          <div class="media-skeleton" id="img-skel-${clip.id}" style="${clip.content ? 'display:none;' : ''}">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+            Decrypting image preview...
+          </div>
         </div>
       `;
       actionsHtml = `
-        <button class="btn btn-primary btn-sm" id="copy-img-${clip.id}">
+        <button class="btn btn-primary btn-sm" id="view-img-${clip.id}" title="View image full size">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg>
+          View Full
+        </button>
+        <button class="btn btn-secondary btn-sm" id="copy-img-${clip.id}">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
           Copy Image
         </button>
@@ -592,16 +671,108 @@
           Download
         </button>
       `;
-    } else {
-      // General or P2P File
+    } else if (effectiveType === 'video') {
+      bodyHtml = `
+        <div class="item-body-video">
+          <video id="vid-${clip.id}" controls playsinline preload="metadata" style="display: none;"></video>
+          <div class="media-skeleton" id="vid-skel-${clip.id}">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
+            Preparing in-browser video player...
+          </div>
+        </div>
+      `;
+      actionsHtml = `
+        <button class="btn btn-primary btn-sm" id="theater-vid-${clip.id}" title="Open video theater view">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18"/><line x1="7" y1="2" x2="7" y2="22"/><line x1="17" y1="2" x2="17" y2="22"/><line x1="2" y1="12" x2="22" y2="12"/></svg>
+          Theater View
+        </button>
+        <button class="btn btn-secondary btn-sm" id="dl-vid-${clip.id}">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          Download Video
+        </button>
+      `;
+    } else if (effectiveType === 'audio') {
+      bodyHtml = `
+        <div class="item-body-audio">
+          <div class="audio-track-header">
+            <div class="audio-glyph">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
+            </div>
+            <div class="doc-info">
+              <div class="doc-name" id="aud-name-${clip.id}" title="${escapeHtml(clip.file_name || 'Audio')}">${escapeHtml(clip.file_name || 'Audio Track')}</div>
+              <div class="doc-size">${formatBytes(clip.file_size)} &bull; In-Browser Playback</div>
+            </div>
+          </div>
+          <audio id="aud-${clip.id}" controls preload="metadata" style="display: none;"></audio>
+          <div class="media-skeleton" id="aud-skel-${clip.id}" style="min-height: 48px;">
+            Decrypting audio player...
+          </div>
+        </div>
+      `;
+      actionsHtml = `
+        <button class="btn btn-secondary btn-sm" id="dl-aud-${clip.id}">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          Download Audio
+        </button>
+      `;
+    } else if (effectiveType === 'pdf') {
       bodyHtml = `
         <div class="item-body-file">
-          <div class="doc-glyph" style="${clip.type === 'p2p_file' ? 'background: rgba(0, 210, 255, 0.15); color: #00d2ff;' : ''}">
+          <div class="doc-glyph" style="background: rgba(239, 68, 68, 0.15); color: #f87171;">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+          </div>
+          <div class="doc-info">
+            <div class="doc-name" id="doc-name-${clip.id}" title="${escapeHtml(clip.file_name || 'document.pdf')}">${escapeHtml(clip.file_name || 'Document.pdf')}</div>
+            <div class="doc-size">${formatBytes(clip.file_size)} &bull; Viewable in Browser</div>
+          </div>
+        </div>
+      `;
+      actionsHtml = `
+        <button class="btn btn-primary btn-sm" id="view-pdf-${clip.id}" title="Read PDF in browser without downloading">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+          Quick View (In-Browser)
+        </button>
+        <button class="btn btn-secondary btn-sm" id="dl-pdf-${clip.id}">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          Download
+        </button>
+      `;
+    } else if (effectiveType === 'code') {
+      bodyHtml = `
+        <div class="item-body-file">
+          <div class="doc-glyph" style="background: rgba(16, 185, 129, 0.15); color: #34d399;">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+          </div>
+          <div class="doc-info">
+            <div class="doc-name" id="doc-name-${clip.id}" title="${escapeHtml(clip.file_name)}">${escapeHtml(clip.file_name)}</div>
+            <div class="doc-size">${formatBytes(clip.file_size)} &bull; Source / Text Document</div>
+          </div>
+        </div>
+      `;
+      actionsHtml = `
+        <button class="btn btn-primary btn-sm" id="view-code-${clip.id}">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+          Preview Snippet
+        </button>
+        <button class="btn btn-secondary btn-sm" id="copy-code-${clip.id}">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+          Copy Text
+        </button>
+        <button class="btn btn-secondary btn-sm" id="dl-code-${clip.id}">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          Download
+        </button>
+      `;
+    } else {
+      // General File
+      bodyHtml = `
+        <div class="item-body-file">
+          <div class="doc-glyph">
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><polyline points="13 2 13 9 20 9"/></svg>
           </div>
           <div class="doc-info">
             <div class="doc-name" id="doc-name-${clip.id}" title="${escapeHtml(clip.file_name)}">${escapeHtml(clip.file_name)}</div>
-            <div class="doc-size">${formatBytes(clip.file_size)} &bull; ${clip.type === 'p2p_file' ? 'Direct P2P' : 'AES-256 Encrypted'}</div>
+            <div class="doc-size">${formatBytes(clip.file_size)} &bull; ${clip.is_p2p || clip.type === 'p2p_file' ? 'Direct P2P' : 'AES-256 Encrypted'}</div>
           </div>
         </div>
       `;
@@ -620,7 +791,7 @@
       </div>
       ${bodyHtml}
       <div class="item-actions-bar">
-        <div style="display: flex; gap: 8px;">
+        <div style="display: flex; gap: 8px; flex-wrap: wrap;">
           ${actionsHtml}
         </div>
         <button class="btn btn-danger btn-sm btn-delete-clip" data-id="${clip.id}" title="Delete clip">
@@ -629,78 +800,180 @@
       </div>
     `;
 
-    // Attach Listeners
-    if (clip.type === 'text') {
+    // --- Attach Interactive Listeners per Type ---
+
+    if (effectiveType === 'text') {
       const copyBtn = card.querySelector('.btn-copy-clip');
       copyBtn.addEventListener('click', () => copyTextToClipboard(decryptedText, copyBtn));
-    } else if (clip.type === 'image') {
+
+    } else if (effectiveType === 'image') {
       const imgEl = card.querySelector(`#img-${clip.id}`);
+      const imgSkel = card.querySelector(`#img-skel-${clip.id}`);
       const copyImgBtn = card.querySelector(`#copy-img-${clip.id}`);
+      const viewImgBtn = card.querySelector(`#view-img-${clip.id}`);
       const dlImgBtn = card.querySelector(`#dl-img-${clip.id}`);
 
-      let cachedDecrypted = null;
-      async function getDecryptedImage() {
-        if (cachedDecrypted) return cachedDecrypted;
-        if (clip.download_url) {
-          const res = await fetch(clip.download_url);
-          const buf = await res.arrayBuffer();
-          if (currentCryptoKey && window.quickclipCrypto) {
-            cachedDecrypted = await window.quickclipCrypto.decryptFile(buf, currentCryptoKey);
-          } else {
-            const b = new Blob([buf]);
-            cachedDecrypted = { blob: b, downloadUrl: URL.createObjectURL(b), name: clip.file_name };
-          }
+      getDecryptedMedia().then((dec) => {
+        if (dec && imgEl) {
+          imgEl.src = dec.downloadUrl;
+          imgEl.style.display = 'block';
+          if (imgSkel) imgSkel.style.display = 'none';
         }
-        return cachedDecrypted;
-      }
+      }).catch(console.warn);
 
-      if (!clip.content && clip.download_url) {
-        getDecryptedImage().then((dec) => {
-          if (dec && imgEl) imgEl.src = dec.downloadUrl;
-        }).catch(console.warn);
-      }
-
-      copyImgBtn.addEventListener('click', async () => {
-        const dec = await getDecryptedImage();
-        if (dec && dec.blob) copyImageBlobToClipboard(dec.blob, copyImgBtn);
-      });
-
-      dlImgBtn.addEventListener('click', async () => {
-        const dec = await getDecryptedImage();
-        if (dec && dec.downloadUrl) triggerFileDownload(dec.downloadUrl, dec.name || 'image.png');
-      });
-
-      if (imgEl) {
-        imgEl.addEventListener('click', async () => {
-          const dec = await getDecryptedImage();
+      if (viewImgBtn) {
+        viewImgBtn.addEventListener('click', async () => {
+          const dec = await getDecryptedMedia();
           openZoomModal(dec ? dec.downloadUrl : imgEl.src);
         });
       }
-    } else {
-      // General or P2P File
-      const dlBtn = card.querySelector(`#dl-file-${clip.id}`);
-      dlBtn.addEventListener('click', async () => {
-        if (clip.type === 'p2p_file' && clip.download_url) {
-          triggerFileDownload(clip.download_url, clip.file_name);
-          return;
+
+      if (imgEl) {
+        imgEl.addEventListener('click', async () => {
+          const dec = await getDecryptedMedia();
+          openZoomModal(dec ? dec.downloadUrl : imgEl.src);
+        });
+      }
+
+      if (copyImgBtn) {
+        copyImgBtn.addEventListener('click', async () => {
+          const dec = await getDecryptedMedia();
+          if (dec && dec.blob) copyImageBlobToClipboard(dec.blob, copyImgBtn);
+          else showToast('Image format cannot be copied directly. Use Download.', 'info');
+        });
+      }
+
+      if (dlImgBtn) {
+        dlImgBtn.addEventListener('click', async () => {
+          const dec = await getDecryptedMedia();
+          if (dec && dec.downloadUrl) triggerFileDownload(dec.downloadUrl, dec.name || clip.file_name || 'image.png');
+        });
+      }
+
+    } else if (effectiveType === 'video') {
+      const vidEl = card.querySelector(`#vid-${clip.id}`);
+      const vidSkel = card.querySelector(`#vid-skel-${clip.id}`);
+      const theaterBtn = card.querySelector(`#theater-vid-${clip.id}`);
+      const dlVidBtn = card.querySelector(`#dl-vid-${clip.id}`);
+
+      getDecryptedMedia().then((dec) => {
+        if (dec && vidEl) {
+          vidEl.src = dec.downloadUrl;
+          vidEl.style.display = 'block';
+          if (vidSkel) vidSkel.style.display = 'none';
         }
-        showToast('Decrypting file in memory...', 'info', 1000);
-        try {
-          const res = await fetch(clip.download_url);
-          const buf = await res.arrayBuffer();
-          if (currentCryptoKey && window.quickclipCrypto) {
-            const dec = await window.quickclipCrypto.decryptFile(buf, currentCryptoKey);
-            triggerFileDownload(dec.downloadUrl, dec.name || clip.file_name);
-          } else {
-            const b = new Blob([buf]);
-            triggerFileDownload(URL.createObjectURL(b), clip.file_name);
+      }).catch(console.warn);
+
+      if (theaterBtn) {
+        theaterBtn.addEventListener('click', async () => {
+          const dec = await getDecryptedMedia();
+          if (dec && dec.downloadUrl) {
+            openVideoModal(dec.downloadUrl, dec.name || clip.file_name);
           }
-          showToast('Decrypted and downloaded!', 'success');
-        } catch (err) {
-          console.error('File decryption failed:', err);
-          showToast('Decryption failed', 'warning');
+        });
+      }
+
+      if (dlVidBtn) {
+        dlVidBtn.addEventListener('click', async () => {
+          const dec = await getDecryptedMedia();
+          if (dec && dec.downloadUrl) triggerFileDownload(dec.downloadUrl, dec.name || clip.file_name || 'video.mp4');
+        });
+      }
+
+    } else if (effectiveType === 'audio') {
+      const audEl = card.querySelector(`#aud-${clip.id}`);
+      const audSkel = card.querySelector(`#aud-skel-${clip.id}`);
+      const dlAudBtn = card.querySelector(`#dl-aud-${clip.id}`);
+
+      getDecryptedMedia().then((dec) => {
+        if (dec && audEl) {
+          audEl.src = dec.downloadUrl;
+          audEl.style.display = 'block';
+          if (audSkel) audSkel.style.display = 'none';
         }
-      });
+      }).catch(console.warn);
+
+      if (dlAudBtn) {
+        dlAudBtn.addEventListener('click', async () => {
+          const dec = await getDecryptedMedia();
+          if (dec && dec.downloadUrl) triggerFileDownload(dec.downloadUrl, dec.name || clip.file_name || 'audio.mp3');
+        });
+      }
+
+    } else if (effectiveType === 'pdf') {
+      const viewPdfBtn = card.querySelector(`#view-pdf-${clip.id}`);
+      const dlPdfBtn = card.querySelector(`#dl-pdf-${clip.id}`);
+
+      if (viewPdfBtn) {
+        viewPdfBtn.addEventListener('click', async () => {
+          showToast('Decrypting PDF for in-browser view...', 'info', 1000);
+          const dec = await getDecryptedMedia();
+          if (dec && dec.downloadUrl) {
+            openPdfModal(dec.downloadUrl, dec.name || clip.file_name);
+          }
+        });
+      }
+
+      if (dlPdfBtn) {
+        dlPdfBtn.addEventListener('click', async () => {
+          const dec = await getDecryptedMedia();
+          if (dec && dec.downloadUrl) triggerFileDownload(dec.downloadUrl, dec.name || clip.file_name || 'document.pdf');
+        });
+      }
+
+    } else if (effectiveType === 'code') {
+      const viewCodeBtn = card.querySelector(`#view-code-${clip.id}`);
+      const copyCodeBtn = card.querySelector(`#copy-code-${clip.id}`);
+      const dlCodeBtn = card.querySelector(`#dl-code-${clip.id}`);
+
+      async function getCodeText() {
+        const dec = await getDecryptedMedia();
+        if (dec && dec.blob) {
+          return await dec.blob.text();
+        }
+        return '';
+      }
+
+      if (viewCodeBtn) {
+        viewCodeBtn.addEventListener('click', async () => {
+          showToast('Loading text snippet...', 'info', 800);
+          const text = await getCodeText();
+          openCodeModal(text, clip.file_name || 'Code Snippet');
+        });
+      }
+
+      if (copyCodeBtn) {
+        copyCodeBtn.addEventListener('click', async () => {
+          const text = await getCodeText();
+          if (text) copyTextToClipboard(text, copyCodeBtn);
+        });
+      }
+
+      if (dlCodeBtn) {
+        dlCodeBtn.addEventListener('click', async () => {
+          const dec = await getDecryptedMedia();
+          if (dec && dec.downloadUrl) triggerFileDownload(dec.downloadUrl, dec.name || clip.file_name || 'file.txt');
+        });
+      }
+
+    } else {
+      // General File
+      const dlBtn = card.querySelector(`#dl-file-${clip.id}`);
+      if (dlBtn) {
+        dlBtn.addEventListener('click', async () => {
+          showToast('Decrypting file in memory...', 'info', 1000);
+          try {
+            const dec = await getDecryptedMedia();
+            if (dec && dec.downloadUrl) {
+              triggerFileDownload(dec.downloadUrl, dec.name || clip.file_name);
+              showToast('Decrypted and downloaded!', 'success');
+            }
+          } catch (err) {
+            console.error('File decryption failed:', err);
+            showToast('Decryption failed', 'warning');
+          }
+        });
+      }
     }
 
     const delBtn = card.querySelector('.btn-delete-clip');
@@ -807,6 +1080,7 @@
 
   async function processFileDispatch(file, customType = null) {
     if (!currentRoomCode) return;
+    const mediaType = customType || detectMediaType(file.name, file.type);
 
     // Check size against 10 MB standard transfer limit
     if (file.size > STANDARD_MAX_BYTES) {
@@ -830,7 +1104,7 @@
     }
 
     // Standard HTTP upload for files under 10 MB
-    await uploadFileStandard(file, customType);
+    await uploadFileStandard(file, mediaType);
   }
 
   function triggerFileDownload(url, filename) {
@@ -871,11 +1145,7 @@
   }
 
   async function uploadFileStandard(file, customType = null) {
-    let altchaToken = null;
-    if (window.altchaClient) {
-      altchaToken = await window.altchaClient.getValidToken();
-    }
-
+    const mediaType = customType || detectMediaType(file.name, file.type);
     let fileToUpload = file;
     let uploadName = file.name || 'item';
 
@@ -892,8 +1162,9 @@
 
     const formData = new FormData();
     formData.append('file', fileToUpload, uploadName);
-    if (customType) formData.append('custom_type', customType);
-    if (altchaToken) formData.append('altcha', altchaToken);
+    formData.append('file_name', file.name || 'item');
+    formData.append('mime_type', file.type || 'application/octet-stream');
+    formData.append('custom_type', mediaType);
 
     try {
       showToast(`Uploading ${file.name || 'item'}...`, 'info', 1500);
@@ -1177,6 +1448,78 @@
   zoomModal.addEventListener('click', (e) => {
     if (e.target === zoomModal) zoomModal.classList.remove('active');
   });
+
+  // Video Theater Modal
+  function openVideoModal(videoSrc, title = 'Video Player') {
+    if (modalVideoPlayer) {
+      modalVideoPlayer.src = videoSrc;
+      modalVideoPlayer.play().catch(() => {});
+    }
+    if (videoModalTitle) videoModalTitle.textContent = title;
+    if (videoModal) videoModal.classList.add('active');
+  }
+
+  function closeVideoModal() {
+    if (modalVideoPlayer) {
+      modalVideoPlayer.pause();
+      modalVideoPlayer.removeAttribute('src');
+      modalVideoPlayer.load();
+    }
+    if (videoModal) videoModal.classList.remove('active');
+  }
+
+  if (videoModalClose) videoModalClose.addEventListener('click', closeVideoModal);
+  if (videoModal) {
+    videoModal.addEventListener('click', (e) => {
+      if (e.target === videoModal) closeVideoModal();
+    });
+  }
+
+  // PDF Quick View Modal
+  function openPdfModal(pdfUrl, title = 'Document Preview') {
+    if (pdfModalFrame) pdfModalFrame.src = pdfUrl;
+    if (pdfModalOpenTab) pdfModalOpenTab.href = pdfUrl;
+    if (pdfModalTitle) pdfModalTitle.textContent = title;
+    if (pdfModal) pdfModal.classList.add('active');
+  }
+
+  function closePdfModal() {
+    if (pdfModalFrame) pdfModalFrame.src = 'about:blank';
+    if (pdfModal) pdfModal.classList.remove('active');
+  }
+
+  if (pdfModalClose) pdfModalClose.addEventListener('click', closePdfModal);
+  if (pdfModal) {
+    pdfModal.addEventListener('click', (e) => {
+      if (e.target === pdfModal) closePdfModal();
+    });
+  }
+
+  // Text / Code Snippet Modal
+  let activeCodeSnippet = '';
+  function openCodeModal(text, title = 'Code Snippet') {
+    activeCodeSnippet = text;
+    if (codeModalContent) codeModalContent.textContent = text;
+    if (codeModalTitle) codeModalTitle.textContent = title;
+    if (codeModal) codeModal.classList.add('active');
+  }
+
+  function closeCodeModal() {
+    activeCodeSnippet = '';
+    if (codeModal) codeModal.classList.remove('active');
+  }
+
+  if (codeModalClose) codeModalClose.addEventListener('click', closeCodeModal);
+  if (codeModalCopy) {
+    codeModalCopy.addEventListener('click', () => {
+      if (activeCodeSnippet) copyTextToClipboard(activeCodeSnippet, codeModalCopy);
+    });
+  }
+  if (codeModal) {
+    codeModal.addEventListener('click', (e) => {
+      if (e.target === codeModal) closeCodeModal();
+    });
+  }
 
   // New Session & Burn Actions
   btnNewRoom.addEventListener('click', () => {
